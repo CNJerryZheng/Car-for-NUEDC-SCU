@@ -6,6 +6,21 @@
 #include "openmv.h"
 #include "sensor.h"
 
+// ==========================================
+// 📍 比赛与调试控制中心 (下地调车，只改这里！)
+// ==========================================
+
+// 🔄 模式切换开关
+// 0: 【调试模式】跳过视觉打卡，按极速直接测试回城与入库
+// 1: 【正常模式】完整比赛流程 (出发 -> 找柱子 -> 打卡 -> 回归 -> 极速回城 -> 入库)
+#define TASK_MODE 1
+
+// ⚡ 战术速度调节
+#define SPEED_OUTWARD 0.30f // 出发去寻找目标的循迹速度 (稍慢，确保OpenMV不漏看)
+#define SPEED_RETURN 0.80f // 任务完成后返程的循迹速度 (极速，抢比赛时间)
+
+// ==========================================
+
 // 定义系统的所有状态
 typedef enum
 {
@@ -67,10 +82,17 @@ void App_Run(void)
                 return_journey_start_time = HAL_GetTick();
 
                 // 🚀 正式发车！
-                enable_line_tracking = 1; // 🚨 核心修复 2：解除封印，恢复底层自动循迹！
+                enable_line_tracking = 1; // 🚨 解除封印，恢复底层自动循迹！
 
-                // 提示：你目前在测试，可以直接跳到 STATE_TRACKING_BACK
+#if TASK_MODE == 0
+                // 【调试模式】直接应用返程极速，并跳过任务直接回城
+                Chassis_SetTrackingBaseSpeed(SPEED_RETURN);
                 car_state = STATE_TRACKING_BACK;
+#else
+                // 【正常模式】应用出发慢速，去寻找目标
+                Chassis_SetTrackingBaseSpeed(SPEED_OUTWARD);
+                car_state = STATE_TRACKING_OUT;
+#endif
             }
         }
         break;
@@ -101,7 +123,7 @@ void App_Run(void)
         break;
 
     case STATE_TASK_ALERT:
-        Chassis_SetPhysicalSpeed(0.0f, 0.0f);
+        Chassis_Stop_And_Reset(); // 🌟 打卡期间彻底死锁，消除残留推力
         if (alert_done == 1)
         {
             state_timer = HAL_GetTick();
@@ -115,6 +137,10 @@ void App_Run(void)
         {
             // 🌟 记录正式开始返程的时刻，开启“时间护盾”！
             return_journey_start_time = HAL_GetTick();
+
+            // 🌟 核心操作：任务已完成，动态切换为返程极速模式！
+            Chassis_SetTrackingBaseSpeed(SPEED_RETURN);
+
             car_state = STATE_TRACKING_BACK;
         }
         break;
@@ -166,8 +192,7 @@ void App_Run(void)
 
         if (parking_step == 0)
         {
-            // 此时车头已经进入纯白车库，盲开 650ms 把后轮拖进来
-            // 💡 如果你觉得停得太深，就把 650 改小 (比如 500)
+            // 此时车头已经进入纯白车库，盲开 500ms 把后轮拖进来
             if (HAL_GetTick() - state_timer < 500)
             {
                 Chassis_SetPhysicalSpeed(0.35f, 0.35f);
@@ -187,11 +212,7 @@ void App_Run(void)
         else if (parking_step == 1)
         {
             // 彻底死锁
-            Chassis_SetPhysicalSpeed(0.0f, 0.0f);
-            Set_Motor_Output('A', 0);
-            Set_Motor_Output('B', 0);
-            Set_Motor_Output('C', 0);
-            Set_Motor_Output('D', 0);
+            Chassis_Stop_And_Reset();
 
             if (parking_alert_started == 0)
             {
@@ -206,11 +227,7 @@ void App_Run(void)
         break;
     }
     case STATE_STOPPED:
-        Chassis_SetPhysicalSpeed(0.0f, 0.0f);
-        Set_Motor_Output('A', 0);
-        Set_Motor_Output('B', 0);
-        Set_Motor_Output('C', 0);
-        Set_Motor_Output('D', 0);
+        enable_line_tracking = 0;
         Chassis_Stop_And_Reset(); // 🌟 比赛结束，彻底断电重置
         break;
     }

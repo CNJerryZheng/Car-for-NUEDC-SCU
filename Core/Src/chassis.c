@@ -1,9 +1,16 @@
 #include "chassis.h"
+#include "app.h"
 #include "debug.h"
 #include "motor.h"
 #include "pid.h"
 #include "sensor.h" // 用于获取循迹传感器状态
 #include "usart.h" // 用于 VOFA+ 调试发送
+
+// ==========================================
+// 📍 比赛战术速度调节区 (直接在这里修改，下地测试)
+// ==========================================
+#define SPEED_OUTWARD 0.30f // 出发去寻找目标的循迹速度 (稍慢，符合任务要求)
+#define SPEED_RETURN 0.80f // 任务完成后返程的循迹速度 (极速，抢比赛时间)
 
 // ==========================================
 // 🛠️ 核心切换开关：循迹算法宏定义
@@ -35,7 +42,7 @@ static float current_throttle_R = 0.0f;
 // 物理常量定义
 #define WHEEL_PERIMETER_M 0.21f
 #define PULSES_PER_ROUND 1560.0f
-static float base_speed = 0.50f;
+static float base_speed = 0.30f;
 
 // 是否启用循迹
 uint8_t enable_line_tracking = 1;
@@ -52,10 +59,11 @@ static float track_last_error = 0.0f;
 // ==========================================
 // 🐢 方案 B：原本 LUT 查表法的专用参数
 // ==========================================
-static float turn_diff_1 = 0.05f;
-static float turn_diff_2 = 0.10f;
-static float turn_diff_3 = 0.30f;
-static float turn_diff_4 = 0.45f;
+// 完全对齐 PD 方案 (Kp = 0.08，误差等级分别为 1, 2, 3, 4)
+static float turn_diff_1 = 0.08f;
+static float turn_diff_2 = 0.16f;
+static float turn_diff_3 = 0.24f;
+static float turn_diff_4 = 0.32f;
 static uint8_t last_valid_state = 0x04;
 uint8_t is_passing_cross = 0;
 static uint32_t chassis_cross_timer = 0;
@@ -68,8 +76,15 @@ void Chassis_Init(void)
     PID_Init(&pid_right, 8.5f, 0.8f, 0.0f);
 }
 
+// 🌟 新增：专门用于修改循迹基准速度的函数 (更安全，不会与物理盲开速度冲突)
+void Chassis_SetTrackingBaseSpeed(float speed)
+{
+    base_speed = speed;
+}
+
 void Chassis_SetPhysicalSpeed(float speed_L_m_s, float speed_R_m_s)
 {
+    // 删掉原来的判断，让这个函数只负责纯粹的物理盲开速度
     target_physical_L = speed_L_m_s;
     target_physical_R = speed_R_m_s;
 }
@@ -126,40 +141,38 @@ void Chassis_Update(void)
     {
 #if USE_PD_TRACKING == 1
         // ====================================================
-        // 🚀 方案 A：全新外环 PD 算法 (串级 PID) 带弯道降速
+        // 🚀 方案 A：全新外环 PD 算法 (串级 PID) 带误差平滑与速度权重
         // ====================================================
         float current_error_raw = Get_Line_Error(xunji_state);
 
-        // 🛠️ 优化 1：减轻滤波的“迟滞感”，加快反射弧！
-        // 把 0.3 改成 0.6，信任 60% 的新数据。既能消除颤抖，又能极速响应弯道。
         static float filtered_error = 0.0f;
-        filtered_error = 0.6f * current_error_raw + 0.4f * filtered_error;
+        filtered_error = 0.6f * current_error_raw + 0.4f * filtered_error; // (保留你之前调好的滤波比例)
 
-        // PD 公式计算差速
+        // 1. 计算原始的 PD 修正量
         float turn_output = track_Kp * filtered_error + track_Kd * (filtered_error - track_last_error);
-        track_last_error = filtered_error; // 记录平滑后的历史误差
+        track_last_error = filtered_error;
 
-        // 🛠️ 优化 2：【核心大招】弯道动态降速 (Dynamic Base Speed)
-        // 获取当前误差的绝对值 (无需引入 math.h)
+        // 🌟 2. 新增核心逻辑：计算并乘上速度权重
+        // 以 0.50f 为基准。速度为 0.50 时权重为 1.0，完全不改变当前的调车手感！
+        float speed_weight = base_speed / 0.50f;
+        turn_output = turn_output * speed_weight;
+
+        // 3. 弯道动态降速 (保留这部分黑科技)
         float abs_error = filtered_error;
         if (abs_error < 0)
             abs_error = -abs_error;
 
-        // 直道时保持 base_speed，弯道误差越大，基础速度降得越多！(0.06f 是降速系数)
-        // 比如直道误差为 0，速度是 0.50；急弯误差为 4，速度会降到 0.50 - 0.24 = 0.26
         float dynamic_base_speed = base_speed - 0.06f * abs_error;
-
-        // 设定保底速度，防止弯道太急导致车子直接停在弯心
         if (dynamic_base_speed < 0.25f)
             dynamic_base_speed = 0.25f;
 
-        // 差速叠加 (使用降速后的 dynamic_base_speed 代替死板的 base_speed)
+        // 4. 差速叠加
         target_physical_L = dynamic_base_speed + turn_output;
         target_physical_R = dynamic_base_speed - turn_output;
 
 #else
         // ====================================================
-        // 🐢 方案 B：原本的 LUT 查表法
+        // 🐢 方案 B：原本的 LUT 查表法 (已完全对齐 PD 的转向与降速逻辑)
         // ====================================================
         if (xunji_state == 0x1F)
         {
@@ -184,51 +197,75 @@ void Chassis_Update(void)
             float speed_L = base_speed;
             float speed_R = base_speed;
 
+            // 🌟 1. 计算速度权重 (以 0.50f 为基准)
+            float speed_weight = base_speed / 0.50f;
+
+            // 🌟 2. 动态放大或缩小四档转弯差速
+            float dyn_td1 = turn_diff_1 * speed_weight;
+            float dyn_td2 = turn_diff_2 * speed_weight;
+            float dyn_td3 = turn_diff_3 * speed_weight;
+            float dyn_td4 = turn_diff_4 * speed_weight;
+
+            // 🌟 3. 新增：引入 PD 的“弯道动态降速”灵魂！
+            // 根据 4 个误差等级，提前算好 4 个降速后的基准速度 (保底 0.25f)
+            float dyn_base_1 = base_speed - 0.06f * 1.0f;
+            if (dyn_base_1 < 0.25f)
+                dyn_base_1 = 0.25f;
+            float dyn_base_2 = base_speed - 0.06f * 2.0f;
+            if (dyn_base_2 < 0.25f)
+                dyn_base_2 = 0.25f;
+            float dyn_base_3 = base_speed - 0.06f * 3.0f;
+            if (dyn_base_3 < 0.25f)
+                dyn_base_3 = 0.25f;
+            float dyn_base_4 = base_speed - 0.06f * 4.0f;
+            if (dyn_base_4 < 0.25f)
+                dyn_base_4 = 0.25f;
+
             switch (xunji_state)
             {
-            case 0x04:
+            case 0x04: // 居中：全速直行
                 speed_L = base_speed;
                 speed_R = base_speed;
                 last_valid_state = xunji_state;
                 break;
-            case 0x0C:
-                speed_L = base_speed - turn_diff_1;
-                speed_R = base_speed + turn_diff_1;
+            case 0x0C: // 微调：使用 dyn_base_1
+                speed_L = dyn_base_1 - dyn_td1;
+                speed_R = dyn_base_1 + dyn_td1;
                 last_valid_state = xunji_state;
                 break;
-            case 0x08:
-                speed_L = base_speed - turn_diff_2;
-                speed_R = base_speed + turn_diff_2;
+            case 0x08: // 轻微：使用 dyn_base_2
+                speed_L = dyn_base_2 - dyn_td2;
+                speed_R = dyn_base_2 + dyn_td2;
                 last_valid_state = xunji_state;
                 break;
-            case 0x18:
-                speed_L = base_speed - turn_diff_3;
-                speed_R = base_speed + turn_diff_3;
+            case 0x18: // 中度：使用 dyn_base_3
+                speed_L = dyn_base_3 - dyn_td3;
+                speed_R = dyn_base_3 + dyn_td3;
                 last_valid_state = xunji_state;
                 break;
-            case 0x10:
-                speed_L = base_speed - turn_diff_4;
-                speed_R = base_speed + turn_diff_4;
+            case 0x10: // 极度：使用 dyn_base_4
+                speed_L = dyn_base_4 - dyn_td4;
+                speed_R = dyn_base_4 + dyn_td4;
                 last_valid_state = xunji_state;
                 break;
             case 0x06:
-                speed_L = base_speed + turn_diff_1;
-                speed_R = base_speed - turn_diff_1;
+                speed_L = dyn_base_1 + dyn_td1;
+                speed_R = dyn_base_1 - dyn_td1;
                 last_valid_state = xunji_state;
                 break;
             case 0x02:
-                speed_L = base_speed + turn_diff_2;
-                speed_R = base_speed - turn_diff_2;
+                speed_L = dyn_base_2 + dyn_td2;
+                speed_R = dyn_base_2 - dyn_td2;
                 last_valid_state = xunji_state;
                 break;
             case 0x03:
-                speed_L = base_speed + turn_diff_3;
-                speed_R = base_speed - turn_diff_3;
+                speed_L = dyn_base_3 + dyn_td3;
+                speed_R = dyn_base_3 - dyn_td3;
                 last_valid_state = xunji_state;
                 break;
             case 0x01:
-                speed_L = base_speed + turn_diff_4;
-                speed_R = base_speed - turn_diff_4;
+                speed_L = dyn_base_4 + dyn_td4;
+                speed_R = dyn_base_4 - dyn_td4;
                 last_valid_state = xunji_state;
                 break;
             case 0x1F:
@@ -239,13 +276,13 @@ void Chassis_Update(void)
             case 0x1B:
                 if (last_valid_state == 0x10 || last_valid_state == 0x18 || last_valid_state == 0x08)
                 {
-                    speed_L = base_speed - turn_diff_4;
-                    speed_R = base_speed + turn_diff_4;
+                    speed_L = dyn_base_4 - dyn_td4;
+                    speed_R = dyn_base_4 + dyn_td4;
                 }
                 else if (last_valid_state == 0x01 || last_valid_state == 0x03 || last_valid_state == 0x02)
                 {
-                    speed_L = base_speed + turn_diff_4;
-                    speed_R = base_speed - turn_diff_4;
+                    speed_L = dyn_base_4 + dyn_td4;
+                    speed_R = dyn_base_4 - dyn_td4;
                 }
                 else
                 {
@@ -254,15 +291,16 @@ void Chassis_Update(void)
                 }
                 break;
             case 0x00:
+                // 彻底丢线时的原地方向拉回，也乘上权重以适配高速惯性
                 if (last_valid_state == 0x10 || last_valid_state == 0x18 || last_valid_state == 0x08)
                 {
-                    speed_L = -0.15f;
-                    speed_R = 0.35f;
+                    speed_L = -0.15f * speed_weight;
+                    speed_R = 0.35f * speed_weight;
                 }
                 else if (last_valid_state == 0x01 || last_valid_state == 0x03 || last_valid_state == 0x02)
                 {
-                    speed_L = 0.35f;
-                    speed_R = -0.15f;
+                    speed_L = 0.35f * speed_weight;
+                    speed_R = -0.15f * speed_weight;
                 }
                 else
                 {

@@ -1,0 +1,7 @@
+build
+mx.scratch
+!.settings
+.clang-format
+.vscode/launch.json
+.vscode/c_cpp_properties.json
+.clangd

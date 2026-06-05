@@ -1,10 +1,10 @@
 #include "app.h"
-#include "chassis.h"
-#include "sensor.h"
-#include "openmv.h"
 #include "alert.h"
-#include "motor.h"
+#include "chassis.h"
 #include "main.h"
+#include "motor.h"
+#include "openmv.h"
+#include "sensor.h"
 
 // 定义系统的所有状态
 typedef enum
@@ -127,7 +127,7 @@ void App_Run(void)
         if (HAL_GetTick() - return_journey_start_time > 2500)
         {
             static uint8_t garage_armed = 0; // 车库陷阱触发器
-            static uint32_t arm_time = 0;    // 陷阱开启时间
+            static uint32_t arm_time = 0; // 陷阱开启时间
             uint8_t current_state = Get_XunJi_State();
 
             if (garage_armed == 0)
@@ -145,7 +145,7 @@ void App_Run(void)
                 // 这说明线物理上断了，100% 是车库！
                 if (current_state == 0x00)
                 {
-                    enable_line_tracking = 0;    // 确认进车库，正式切断循迹
+                    enable_line_tracking = 0; // 确认进车库，正式切断循迹
                     state_timer = HAL_GetTick(); // 给下一步拖后轮计时用
                     car_state = STATE_PARKING;
                     garage_armed = 0; // 重置陷阱
@@ -211,6 +211,7 @@ void App_Run(void)
         Set_Motor_Output('B', 0);
         Set_Motor_Output('C', 0);
         Set_Motor_Output('D', 0);
+        Chassis_Stop_And_Reset(); // 🌟 比赛结束，彻底断电重置
         break;
     }
 }

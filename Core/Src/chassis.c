@@ -1,9 +1,9 @@
 #include "chassis.h"
-#include "pid.h"
-#include "motor.h"
 #include "debug.h"
-#include "usart.h"  // 用于 VOFA+ 调试发送
+#include "motor.h"
+#include "pid.h"
 #include "sensor.h" // 用于获取循迹传感器状态
+#include "usart.h" // 用于 VOFA+ 调试发送
 
 // ==========================================
 // 🛠️ 核心切换开关：循迹算法宏定义
@@ -72,6 +72,43 @@ void Chassis_SetPhysicalSpeed(float speed_L_m_s, float speed_R_m_s)
 {
     target_physical_L = speed_L_m_s;
     target_physical_R = speed_R_m_s;
+}
+
+// ==========================================
+// 🛑 终极刹车与状态重置大招
+// ==========================================
+void Chassis_Stop_And_Reset(void)
+{
+    // 1. 目标速度清零
+    target_physical_L = 0.0f;
+    target_physical_R = 0.0f;
+
+    // 2. 彻底清空增量式 PID 的“油门蓄水池” (根治抖动的核心)
+    current_throttle_L = 0.0f;
+    current_throttle_R = 0.0f;
+
+    // 3. 清空滤波器历史数据
+    filter_speed_L = 0.0f;
+    filter_speed_R = 0.0f;
+
+    // 4. 清空 PID 内部偏差记录
+    pid_left.Error = 0;
+    pid_left.Last_Error = 0;
+    pid_left.Prev_Error = 0;
+    pid_right.Error = 0;
+    pid_right.Last_Error = 0;
+    pid_right.Prev_Error = 0;
+
+    // 5. 清空外环 PD 的历史误差
+#if USE_PD_TRACKING == 1
+    track_last_error = 0.0f;
+#endif
+
+    // 6. 强制物理电机断电死锁
+    Set_Motor_Output('A', 0);
+    Set_Motor_Output('B', 0);
+    Set_Motor_Output('C', 0);
+    Set_Motor_Output('D', 0);
 }
 
 void Chassis_Update(void)

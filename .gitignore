@@ -5,3 +5,4 @@ mx.scratch
 .vscode/launch.json
 .vscode/c_cpp_properties.json
 .clangd
+svd

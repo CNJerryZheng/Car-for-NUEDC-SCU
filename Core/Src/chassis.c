@@ -1,0 +1,291 @@
+#include "chassis.h"
+#include "pid.h"
+#include "motor.h"
+#include "debug.h"
+#include "usart.h"  // 用于 VOFA+ 调试发送
+#include "sensor.h" // 用于获取循迹传感器状态
+
+// ==========================================
+// 🛠️ 核心切换开关：循迹算法宏定义
+// 1: 使用全新的外环 PD 算法 (丝滑过弯，消灭画龙，带误差滤波消除颤抖)
+// 0: 使用原本的 LUT 查表法 (原汁原味，查表暴力匹配)
+// ==========================================
+#define USE_PD_TRACKING 1
+
+// ==========================================
+// 🔒 私有变量：对外部世界完全隐藏
+// ==========================================
+PID_TypeDef pid_left;
+PID_TypeDef pid_right;
+extern TIM_HandleTypeDef htim2;
+extern TIM_HandleTypeDef htim3;
+
+// 底盘运动状态
+static float target_physical_L = 0.0f;
+static float target_physical_R = 0.0f;
+
+// 滤波器历史数据
+static float filter_speed_L = 0.0f;
+static float filter_speed_R = 0.0f;
+
+// 增量式 PID 的“油门蓄水池”
+static float current_throttle_L = 0.0f;
+static float current_throttle_R = 0.0f;
+
+// 物理常量定义
+#define WHEEL_PERIMETER_M 0.21f
+#define PULSES_PER_ROUND 1560.0f
+static float base_speed = 0.50f;
+
+// 是否启用循迹
+uint8_t enable_line_tracking = 1;
+
+#if USE_PD_TRACKING == 1
+// ==========================================
+// 🌟 方案 A：外环巡线 PD 参数 (下地需微调)
+// ==========================================
+static float track_Kp = 0.08f; // P：控制拐弯的力度
+static float track_Kd = 0.35f; // D：阻尼器，抑制直线画龙和过弯摆头
+static float track_last_error = 0.0f;
+
+#else
+// ==========================================
+// 🐢 方案 B：原本 LUT 查表法的专用参数
+// ==========================================
+static float turn_diff_1 = 0.05f;
+static float turn_diff_2 = 0.10f;
+static float turn_diff_3 = 0.30f;
+static float turn_diff_4 = 0.45f;
+static uint8_t last_valid_state = 0x04;
+uint8_t is_passing_cross = 0;
+static uint32_t chassis_cross_timer = 0;
+#endif
+
+void Chassis_Init(void)
+{
+    // 内环增量式 PID：Kp 负责刹车，Ki 负责推力
+    PID_Init(&pid_left, 9.5f, 0.8f, 0.0f);
+    PID_Init(&pid_right, 8.5f, 0.8f, 0.0f);
+}
+
+void Chassis_SetPhysicalSpeed(float speed_L_m_s, float speed_R_m_s)
+{
+    target_physical_L = speed_L_m_s;
+    target_physical_R = speed_R_m_s;
+}
+
+void Chassis_Update(void)
+{
+    uint8_t xunji_state = Get_XunJi_State();
+
+    if (enable_line_tracking == 0)
+    {
+        // 停车或视觉模式，清理状态，不干预速度
+#if USE_PD_TRACKING == 0
+        is_passing_cross = 0;
+#endif
+    }
+    else
+    {
+#if USE_PD_TRACKING == 1
+        // ====================================================
+        // 🚀 方案 A：全新外环 PD 算法 (串级 PID) 带弯道降速
+        // ====================================================
+        float current_error_raw = Get_Line_Error(xunji_state);
+
+        // 🛠️ 优化 1：减轻滤波的“迟滞感”，加快反射弧！
+        // 把 0.3 改成 0.6，信任 60% 的新数据。既能消除颤抖，又能极速响应弯道。
+        static float filtered_error = 0.0f;
+        filtered_error = 0.6f * current_error_raw + 0.4f * filtered_error;
+
+        // PD 公式计算差速
+        float turn_output = track_Kp * filtered_error + track_Kd * (filtered_error - track_last_error);
+        track_last_error = filtered_error; // 记录平滑后的历史误差
+
+        // 🛠️ 优化 2：【核心大招】弯道动态降速 (Dynamic Base Speed)
+        // 获取当前误差的绝对值 (无需引入 math.h)
+        float abs_error = filtered_error;
+        if (abs_error < 0)
+            abs_error = -abs_error;
+
+        // 直道时保持 base_speed，弯道误差越大，基础速度降得越多！(0.06f 是降速系数)
+        // 比如直道误差为 0，速度是 0.50；急弯误差为 4，速度会降到 0.50 - 0.24 = 0.26
+        float dynamic_base_speed = base_speed - 0.06f * abs_error;
+
+        // 设定保底速度，防止弯道太急导致车子直接停在弯心
+        if (dynamic_base_speed < 0.25f)
+            dynamic_base_speed = 0.25f;
+
+        // 差速叠加 (使用降速后的 dynamic_base_speed 代替死板的 base_speed)
+        target_physical_L = dynamic_base_speed + turn_output;
+        target_physical_R = dynamic_base_speed - turn_output;
+
+#else
+        // ====================================================
+        // 🐢 方案 B：原本的 LUT 查表法
+        // ====================================================
+        if (xunji_state == 0x1F)
+        {
+            is_passing_cross = 1;
+            chassis_cross_timer = HAL_GetTick();
+        }
+
+        if (is_passing_cross == 1)
+        {
+            if (HAL_GetTick() - chassis_cross_timer < 200)
+            {
+                target_physical_L = base_speed;
+                target_physical_R = base_speed;
+            }
+            else
+            {
+                is_passing_cross = 0;
+            }
+        }
+        else
+        {
+            float speed_L = base_speed;
+            float speed_R = base_speed;
+
+            switch (xunji_state)
+            {
+            case 0x04:
+                speed_L = base_speed;
+                speed_R = base_speed;
+                last_valid_state = xunji_state;
+                break;
+            case 0x0C:
+                speed_L = base_speed - turn_diff_1;
+                speed_R = base_speed + turn_diff_1;
+                last_valid_state = xunji_state;
+                break;
+            case 0x08:
+                speed_L = base_speed - turn_diff_2;
+                speed_R = base_speed + turn_diff_2;
+                last_valid_state = xunji_state;
+                break;
+            case 0x18:
+                speed_L = base_speed - turn_diff_3;
+                speed_R = base_speed + turn_diff_3;
+                last_valid_state = xunji_state;
+                break;
+            case 0x10:
+                speed_L = base_speed - turn_diff_4;
+                speed_R = base_speed + turn_diff_4;
+                last_valid_state = xunji_state;
+                break;
+            case 0x06:
+                speed_L = base_speed + turn_diff_1;
+                speed_R = base_speed - turn_diff_1;
+                last_valid_state = xunji_state;
+                break;
+            case 0x02:
+                speed_L = base_speed + turn_diff_2;
+                speed_R = base_speed - turn_diff_2;
+                last_valid_state = xunji_state;
+                break;
+            case 0x03:
+                speed_L = base_speed + turn_diff_3;
+                speed_R = base_speed - turn_diff_3;
+                last_valid_state = xunji_state;
+                break;
+            case 0x01:
+                speed_L = base_speed + turn_diff_4;
+                speed_R = base_speed - turn_diff_4;
+                last_valid_state = xunji_state;
+                break;
+            case 0x1F:
+            case 0x0E:
+                speed_L = base_speed;
+                speed_R = base_speed;
+                break;
+            case 0x1B:
+                if (last_valid_state == 0x10 || last_valid_state == 0x18 || last_valid_state == 0x08)
+                {
+                    speed_L = base_speed - turn_diff_4;
+                    speed_R = base_speed + turn_diff_4;
+                }
+                else if (last_valid_state == 0x01 || last_valid_state == 0x03 || last_valid_state == 0x02)
+                {
+                    speed_L = base_speed + turn_diff_4;
+                    speed_R = base_speed - turn_diff_4;
+                }
+                else
+                {
+                    speed_L = base_speed;
+                    speed_R = base_speed;
+                }
+                break;
+            case 0x00:
+                if (last_valid_state == 0x10 || last_valid_state == 0x18 || last_valid_state == 0x08)
+                {
+                    speed_L = -0.15f;
+                    speed_R = 0.35f;
+                }
+                else if (last_valid_state == 0x01 || last_valid_state == 0x03 || last_valid_state == 0x02)
+                {
+                    speed_L = 0.35f;
+                    speed_R = -0.15f;
+                }
+                else
+                {
+                    speed_L = base_speed;
+                    speed_R = base_speed;
+                }
+                break;
+            default:
+                speed_L = base_speed;
+                speed_R = base_speed;
+                break;
+            }
+
+            target_physical_L = speed_L;
+            target_physical_R = speed_R;
+        }
+#endif
+    }
+
+    // ========================================================
+    // 🔒 无论哪种循迹方案，下面的内环速度 PID 闭环原封不动！
+    // ========================================================
+    int16_t current_speed_L_raw = (int16_t)__HAL_TIM_GET_COUNTER(&htim2);
+    __HAL_TIM_SET_COUNTER(&htim2, 0);
+    current_speed_L_raw = -current_speed_L_raw;
+
+    int16_t current_speed_R_raw = (int16_t)__HAL_TIM_GET_COUNTER(&htim3);
+    __HAL_TIM_SET_COUNTER(&htim3, 0);
+
+    filter_speed_L = 0.1f * (float)current_speed_L_raw + 0.9f * filter_speed_L;
+    filter_speed_R = 0.1f * (float)current_speed_R_raw + 0.9f * filter_speed_R;
+
+    float target_pulses_L = (target_physical_L * 0.01f) / WHEEL_PERIMETER_M * PULSES_PER_ROUND;
+    float target_pulses_R = (target_physical_R * 0.01f) / WHEEL_PERIMETER_M * PULSES_PER_ROUND;
+
+    float out_pwm_L = PID_Locomotive_Calc(&pid_left, target_pulses_L, filter_speed_L);
+    float out_pwm_R = PID_Locomotive_Calc(&pid_right, target_pulses_R, filter_speed_R);
+
+    current_throttle_L += out_pwm_L;
+    current_throttle_R += out_pwm_R;
+
+    if (current_throttle_L > 950.0f)
+        current_throttle_L = 950.0f;
+    if (current_throttle_L < -950.0f)
+        current_throttle_L = -950.0f;
+    if (current_throttle_R > 950.0f)
+        current_throttle_R = 950.0f;
+    if (current_throttle_R < -950.0f)
+        current_throttle_R = -950.0f;
+
+    Set_Motor_Output('C', (int16_t)current_throttle_L);
+    Set_Motor_Output('D', (int16_t)current_throttle_L);
+    Set_Motor_Output('A', (int16_t)current_throttle_R);
+    Set_Motor_Output('B', (int16_t)current_throttle_R);
+
+    // 发送数据给 VOFA+
+    float vofa_data[4];
+    vofa_data[0] = target_pulses_L;
+    vofa_data[1] = filter_speed_L;
+    vofa_data[2] = target_pulses_R;
+    vofa_data[3] = filter_speed_R;
+    JustFloat_Send(vofa_data, 4);
+}

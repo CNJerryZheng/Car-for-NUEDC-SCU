@@ -192,8 +192,8 @@ void App_Run(void)
 
         if (parking_step == 0)
         {
-            // 此时车头已经进入纯白车库，盲开 500ms 把后轮拖进来
-            if (HAL_GetTick() - state_timer < 500)
+            // 此时车头已经进入纯白车库，盲开 400ms 把后轮拖进来
+            if (HAL_GetTick() - state_timer < 400)
             {
                 Chassis_SetPhysicalSpeed(0.35f, 0.35f);
             }

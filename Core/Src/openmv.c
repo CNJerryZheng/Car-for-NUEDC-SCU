@@ -7,7 +7,7 @@ int16_t openmv_x_error = 0;
 
 // 接收缓存
 uint8_t rx_buffer[1]; // 每次中断接收1个字节
-uint8_t rx_frame[5];  // 完整数据包缓存
+uint8_t rx_frame[5]; // 完整数据包缓存
 uint8_t rx_index = 0; // 接收索引
 
 /**
@@ -22,7 +22,7 @@ void OpenMV_Init(void)
 /**
  * @brief  串口接收完成中断回调函数 (HAL库内部弱函数的重写)
  */
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef* huart)
 {
     // 判断是不是 USART1 触发的中断
     if (huart->Instance == USART1)

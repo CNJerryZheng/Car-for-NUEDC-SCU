@@ -3,7 +3,7 @@
 /**
  * @brief  PID 参数初始化
  */
-void PID_Init(PID_TypeDef *pid, float p, float i, float d)
+void PID_Init(PID_TypeDef* pid, float p, float i, float d)
 {
     pid->Kp = p;
     pid->Ki = i;
@@ -20,7 +20,7 @@ void PID_Init(PID_TypeDef *pid, float p, float i, float d)
  * @param  current: 当前通过编码器测出来的实际速度（反馈值）
  * @retval 占空比增量（增量输出）
  */
-float PID_Locomotive_Calc(PID_TypeDef *pid, float target, float current)
+float PID_Locomotive_Calc(PID_TypeDef* pid, float target, float current)
 {
     float increment = 0.0f;
     pid->Error = target - current;
@@ -31,9 +31,7 @@ float PID_Locomotive_Calc(PID_TypeDef *pid, float target, float current)
         pid->Error = 0.0f;
     }
 
-    increment = pid->Kp * (pid->Error - pid->Last_Error) +
-                pid->Ki * pid->Error +
-                pid->Kd * (pid->Error - 2.0f * pid->Last_Error + pid->Prev_Error);
+    increment = pid->Kp * (pid->Error - pid->Last_Error) + pid->Ki * pid->Error + pid->Kd * (pid->Error - 2.0f * pid->Last_Error + pid->Prev_Error);
 
     pid->Prev_Error = pid->Last_Error;
     pid->Last_Error = pid->Error;

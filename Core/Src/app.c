@@ -19,6 +19,18 @@
 #define SPEED_OUTWARD 0.30f // 出发去寻找目标的循迹速度 (稍慢，确保OpenMV不漏看)
 #define SPEED_RETURN 0.80f // 任务完成后返程的循迹速度 (极速，抢比赛时间)
 
+// 📢 蜂鸣器硬件与行为配置 (需与 main.c 和 alert.c 保持一致)
+#define ENABLE_STARTUP_BEEP 1 // 1:开启开机和发车鸣笛, 0:关闭 (深夜调车防扰民)
+#define BEEP_ACTIVE_LEVEL 1 // 1:高电平触发鸣笛, 0:低电平触发鸣笛
+
+// 自动电平映射转换 (请勿修改)
+#if BEEP_ACTIVE_LEVEL == 1
+#define BEEP_ON GPIO_PIN_SET
+#define BEEP_OFF GPIO_PIN_RESET
+#else
+#define BEEP_ON GPIO_PIN_RESET
+#define BEEP_OFF GPIO_PIN_SET
+#endif
 // ==========================================
 
 // 定义系统的所有状态
@@ -66,10 +78,12 @@ void App_Run(void)
             // 再次确认是否真的按下了
             if (HAL_GPIO_ReadPin(START_KEY_GPIO_Port, START_KEY_Pin) == GPIO_PIN_SET)
             {
+#if ENABLE_STARTUP_BEEP == 1
                 // 【发车前置动作】：让蜂鸣器短鸣一声 “滴~”，提示手可以放开了
-                HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, GPIO_PIN_SET);
+                HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, BEEP_ON);
                 HAL_Delay(100);
-                HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, GPIO_PIN_RESET);
+                HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, BEEP_OFF);
+#endif
 
                 // 🔒 稳健松手检测：如果手一直按着，程序就卡死在这里，防止你手还没抽回来车就飞了
                 while (HAL_GPIO_ReadPin(START_KEY_GPIO_Port, START_KEY_Pin) == GPIO_PIN_SET)

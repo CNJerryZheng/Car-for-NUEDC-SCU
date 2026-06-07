@@ -41,6 +41,22 @@
  * 4: 【VOFA测试】通过串口发送超声波和 OpenMV 数据到电脑查看
  */
 #define TEST_MODE 0
+
+// ==========================================
+// 📢 蜂鸣器硬件与行为配置
+// ==========================================
+#define ENABLE_STARTUP_BEEP 1 // 1:开启开机和发车鸣笛, 0:关闭 (深夜调车防扰民)
+#define BEEP_ACTIVE_LEVEL 1 // 1:高电平触发鸣笛, 0:低电平触发鸣笛
+
+// 自动电平映射转换 (请勿修改)
+#if BEEP_ACTIVE_LEVEL == 1
+#define BEEP_ON GPIO_PIN_SET
+#define BEEP_OFF GPIO_PIN_RESET
+#else
+#define BEEP_ON GPIO_PIN_RESET
+#define BEEP_OFF GPIO_PIN_SET
+#endif
+// ==========================================
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -117,10 +133,15 @@ int main(void)
     OpenMV_Init();
     App_Init();
 
+#if ENABLE_STARTUP_BEEP == 1
     // 开机短鸣提示初始化完成
-    HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, BEEP_ON);
     HAL_Delay(200);
-    HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, BEEP_OFF);
+#else
+    // 确保蜂鸣器初始状态为静音
+    HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, BEEP_OFF);
+#endif
     HAL_Delay(1000); // 留出一点放置小车的时间
 
     // 4. 开启 TIM1 10ms 节拍器中断 (系统心跳)
@@ -239,7 +260,7 @@ void Error_Handler(void)
 #ifdef USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
+  * where the assert_param error has occurred.
   * @param  file: pointer to the source file name
   * @param  line: assert_param error line source number
   * @retval None

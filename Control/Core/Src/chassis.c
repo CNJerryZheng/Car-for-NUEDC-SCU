@@ -10,7 +10,7 @@
 // 📍 比赛战术速度调节区 (直接在这里修改，下地测试)
 // ==========================================
 #define SPEED_OUTWARD 0.30f // 出发去寻找目标的循迹速度 (稍慢，符合任务要求)
-#define SPEED_RETURN 0.80f // 任务完成后返程的循迹速度 (极速，抢比赛时间)
+#define SPEED_RETURN 0.85f // 任务完成后返程的循迹速度 (极速，抢比赛时间)
 
 // ==========================================
 // 🛠️ 核心切换开关：循迹算法宏定义
@@ -52,7 +52,7 @@ uint8_t enable_line_tracking = 1;
 // 🌟 方案 A：外环巡线 PD 参数 (下地需微调)
 // ==========================================
 static float track_Kp = 0.08f; // P：控制拐弯的力度
-static float track_Kd = 0.35f; // D：阻尼器，抑制直线画龙和过弯摆头
+static float track_Kd = 0.40f; // D：阻尼器，抑制直线画龙和过弯摆头
 static float track_last_error = 0.0f;
 
 #else
@@ -157,55 +157,19 @@ void Chassis_Update(void)
         float speed_weight = base_speed / 0.50f;
         turn_output = turn_output * speed_weight;
 
-        // 获取绝对误差
+        // 3. 弯道动态降速 (保留这部分黑科技)
         float abs_error = filtered_error;
         if (abs_error < 0)
             abs_error = -abs_error;
 
-        // 🌟🌟 新增：动态计算弯道触发阈值 🌟🌟
-        // 高速状态(>=0.7m/s)下放宽到 3.0，允许直道上有较大的画龙冗余
-        // 中低速状态下保持 2.0，确保进弯敏锐度
-        float curve_threshold = (base_speed >= 0.70f) ? 3.0f : 2.0f;
-
-        // ====================================================
-        // 🚨 调试专用：进弯亮灯检测 (非阻塞式)
-        // 使用动态阈值 curve_threshold 进行判定
-        // ====================================================
-        // static uint32_t debug_led_timer = 0;
-
-        // if (abs_error >= curve_threshold)
-        // {
-        //     // 只要还在弯道内，就一直重置计时器，并保持外部 LED 亮起
-        //     HAL_GPIO_WritePin(LED_OUTSIDE_GPIO_Port, LED_OUTSIDE_Pin, GPIO_PIN_SET);
-        //     debug_led_timer = HAL_GetTick();
-        // }
-
-        // // 当误差小于阈值 (出弯) 后，倒计时 300ms 关闭 LED
-        // if (debug_led_timer > 0 && (HAL_GetTick() - debug_led_timer >= 300))
-        // {
-        //     HAL_GPIO_WritePin(LED_OUTSIDE_GPIO_Port, LED_OUTSIDE_Pin, GPIO_PIN_RESET);
-        //     debug_led_timer = 0; // 重置定时器状态
-        // }
-        // ====================================================
-
-        // 🌟 3. 弯道动态降速 (使用动态死区策略)
-        float dynamic_base_speed = base_speed;
-
-        // 只有超过了对应的速度阈值，才触发弯道降速逻辑
-        if (abs_error >= curve_threshold)
-        {
-            // 高速时的降速惩罚系数也相应减弱 (0.12)，防止急刹感；低速保持 0.06
-            float drop_coef = (base_speed >= 0.70f) ? 0.14f : 0.06f;
-            dynamic_base_speed = base_speed - drop_coef * abs_error;
-
-            // 设定保底速度，防止弯道太急导致车子直接停在弯心
-            if (dynamic_base_speed < 0.25f)
-                dynamic_base_speed = 0.25f;
-        }
+        float dynamic_base_speed = base_speed - 0.06f * abs_error;
+        if (dynamic_base_speed < 0.25f)
+            dynamic_base_speed = 0.25f;
 
         // 4. 差速叠加
         target_physical_L = dynamic_base_speed + turn_output;
         target_physical_R = dynamic_base_speed - turn_output;
+
 #else
         // ====================================================
         // 🐢 方案 B：原本的 LUT 查表法 (已完全对齐 PD 的转向与降速逻辑)

@@ -17,7 +17,12 @@
 
 // ⚡ 战术速度调节
 #define SPEED_OUTWARD 0.30f // 出发去寻找目标的循迹速度 (稍慢，确保OpenMV不漏看)
-#define SPEED_RETURN 0.80f // 任务完成后返程的循迹速度 (极速，抢比赛时间)
+#define SPEED_RETURN 0.85f // 任务完成后返程的循迹速度 (极速，抢比赛时间)
+
+// 🔄 任务完成后回线策略 (🌟 新增)
+// 0: 【倒车回线】打卡后挂倒挡，原路退回黑线 (保守安全)
+// 1: 【直行回线】打卡后继续直行，往前寻找黑线 (激进省时，适合赛道在前方的场地)
+#define RETURN_STRATEGY 0
 
 // 📢 蜂鸣器硬件与行为配置 (需与 main.c 和 alert.c 保持一致)
 #define ENABLE_STARTUP_BEEP 1 // 1:开启开机和发车鸣笛, 0:关闭 (深夜调车防扰民)
@@ -163,7 +168,11 @@ void App_Run(void)
         break;
 
     case STATE_RETURN_LINE:
+
+#if RETURN_STRATEGY == 0
+        // 【策略 0：原路倒车】
         Chassis_SetPhysicalSpeed(-0.3f, -0.3f);
+        // 这里的 700 是“护盾时间”(盲开时间)，防止刚启动时被地上的阴影或绿柱子底座误判为黑线
         if ((HAL_GetTick() - state_timer > 700) && (Get_XunJi_State() != 0x00))
         {
             // 🌟 记录正式开始返程的时刻，开启“时间护盾”！
@@ -174,6 +183,23 @@ void App_Run(void)
 
             car_state = STATE_TRACKING_BACK;
         }
+#else
+        // 【策略 1：继续直行】
+        // 💡 如果你觉得 0.3 的直行找线速度太慢，可以单独把这里改成 0.4f
+        Chassis_SetPhysicalSpeed(0.3f, 0.3f);
+        // 这里的 1000 是“护盾时间”(盲开时间)，防止刚启动时被地上的阴影或绿柱子底座误判为黑线
+        if ((HAL_GetTick() - state_timer > 1000) && (Get_XunJi_State() != 0x00))
+        {
+            // 🌟 记录正式开始返程的时刻，开启“时间护盾”！
+            return_journey_start_time = HAL_GetTick();
+
+            // 🌟 核心操作：任务已完成，动态切换为返程极速模式！
+            Chassis_SetTrackingBaseSpeed(SPEED_RETURN);
+
+            car_state = STATE_TRACKING_BACK;
+        }
+#endif
+
         break;
 
     case STATE_TRACKING_BACK:

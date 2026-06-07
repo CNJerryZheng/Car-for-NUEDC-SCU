@@ -1,0 +1,46 @@
+BasedOnStyle: Microsoft
+Language: Cpp
+AccessModifierOffset: -4
+AlignArrayOfStructures: Left
+AlignEscapedNewlines: Left
+AlignOperands: DontAlign
+AlignTrailingComments: false
+AllowAllParametersOfDeclarationOnNextLine: false
+AllowShortFunctionsOnASingleLine: None
+AlwaysBreakTemplateDeclarations: Yes
+BinPackArguments: false
+BinPackParameters: false
+BraceWrapping:
+  AfterCaseLabel: true
+  AfterUnion: true
+  AfterExternBlock: false
+BreakBeforeBinaryOperators: NonAssignment
+BreakBeforeTernaryOperators: false
+BreakConstructorInitializers: AfterColon
+BreakInheritanceList: AfterColon
+ColumnLimit: 0
+CommentPragmas: "suppress"
+ConstructorInitializerAllOnOneLineOrOnePerLine: true
+Cpp11BracedListStyle: false
+FixNamespaceComments: false
+IncludeBlocks: Preserve
+IncludeCategories:
+  - Regex: "^.*(precomp|pch|stdafx)"
+    Priority: -1
+  - Regex: "^<.*>"
+    Priority: 1
+  - Regex: '^".*"'
+    Priority: 2
+  - Regex: ".*"
+    Priority: 3
+KeepEmptyLinesAtTheStartOfBlocks: false
+MacroBlockBegin: "BEGIN_TEST_METHOD_PROPERTIES|BEGIN_MODULE|BEGIN_TEST_CLASS|BEGIN_TEST_METHOD"
+MacroBlockEnd: "END_TEST_METHOD_PROPERTIES|END_MODULE|END_TEST_CLASS|END_TEST_METHOD"
+NamespaceIndentation: All
+PointerAlignment: Left
+ReflowComments: false
+SortIncludes: CaseSensitive
+SpaceAfterTemplateKeyword: true
+SpaceBeforeCpp11BracedList: true
+SpacesInAngles: false
+SpacesInContainerLiterals: false

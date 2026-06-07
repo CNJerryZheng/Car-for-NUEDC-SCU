@@ -163,29 +163,29 @@ void Chassis_Update(void)
             abs_error = -abs_error;
 
         // 🌟🌟 新增：动态计算弯道触发阈值 🌟🌟
-        // 高速状态(>=0.7m/s)下放宽到 3.6，允许直道上有较大的画龙冗余
+        // 高速状态(>=0.7m/s)下放宽到 3.0，允许直道上有较大的画龙冗余
         // 中低速状态下保持 2.0，确保进弯敏锐度
-        float curve_threshold = (base_speed >= 0.70f) ? 3.6f : 2.0f;
+        float curve_threshold = (base_speed >= 0.70f) ? 3.0f : 2.0f;
 
         // ====================================================
         // 🚨 调试专用：进弯亮灯检测 (非阻塞式)
         // 使用动态阈值 curve_threshold 进行判定
         // ====================================================
-        static uint32_t debug_led_timer = 0;
+        // static uint32_t debug_led_timer = 0;
 
-        if (abs_error >= curve_threshold)
-        {
-            // 只要还在弯道内，就一直重置计时器，并保持外部 LED 亮起
-            HAL_GPIO_WritePin(LED_OUTSIDE_GPIO_Port, LED_OUTSIDE_Pin, GPIO_PIN_SET);
-            debug_led_timer = HAL_GetTick();
-        }
+        // if (abs_error >= curve_threshold)
+        // {
+        //     // 只要还在弯道内，就一直重置计时器，并保持外部 LED 亮起
+        //     HAL_GPIO_WritePin(LED_OUTSIDE_GPIO_Port, LED_OUTSIDE_Pin, GPIO_PIN_SET);
+        //     debug_led_timer = HAL_GetTick();
+        // }
 
-        // 当误差小于阈值 (出弯) 后，倒计时 300ms 关闭 LED
-        if (debug_led_timer > 0 && (HAL_GetTick() - debug_led_timer >= 300))
-        {
-            HAL_GPIO_WritePin(LED_OUTSIDE_GPIO_Port, LED_OUTSIDE_Pin, GPIO_PIN_RESET);
-            debug_led_timer = 0; // 重置定时器状态
-        }
+        // // 当误差小于阈值 (出弯) 后，倒计时 300ms 关闭 LED
+        // if (debug_led_timer > 0 && (HAL_GetTick() - debug_led_timer >= 300))
+        // {
+        //     HAL_GPIO_WritePin(LED_OUTSIDE_GPIO_Port, LED_OUTSIDE_Pin, GPIO_PIN_RESET);
+        //     debug_led_timer = 0; // 重置定时器状态
+        // }
         // ====================================================
 
         // 🌟 3. 弯道动态降速 (使用动态死区策略)
@@ -194,8 +194,8 @@ void Chassis_Update(void)
         // 只有超过了对应的速度阈值，才触发弯道降速逻辑
         if (abs_error >= curve_threshold)
         {
-            // 高速时的降速惩罚系数也相应减弱 (0.015)，防止急刹感；低速保持 0.06
-            float drop_coef = (base_speed >= 0.70f) ? 0.015f : 0.06f;
+            // 高速时的降速惩罚系数也相应减弱 (0.12)，防止急刹感；低速保持 0.06
+            float drop_coef = (base_speed >= 0.70f) ? 0.14f : 0.06f;
             dynamic_base_speed = base_speed - drop_coef * abs_error;
 
             // 设定保底速度，防止弯道太急导致车子直接停在弯心

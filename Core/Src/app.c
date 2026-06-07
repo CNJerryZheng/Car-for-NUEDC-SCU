@@ -107,17 +107,34 @@ void App_Run(void)
         break;
 
     case STATE_APPROACH_TARGET:
-        enable_line_tracking = 0;
-        float dist = Hcsr04GetLength();
-        if (dist > 0.0f && dist < 0.4f)
+        enable_line_tracking = 0; // 彻底剥夺底层循迹控制权
+
+        // 🌟 超声波 50ms 非阻塞旁路 (Fail-safe)
+        static uint32_t last_sonar_time = 0;
+        static float last_dist = 9.9f;
+
+        if (HAL_GetTick() - last_sonar_time > 50)
         {
+            last_dist = Hcsr04GetLength(); // 每 50ms 更新一次超声波作为兜底防撞
+            last_sonar_time = HAL_GetTick();
+        }
+
+        // 🌟 核心修改：双重保险停车逻辑！(视觉主导，超声波兜底)
+        if (openmv_stop_flag == 1 || (last_dist > 0.0f && last_dist < 0.4f))
+        {
+            HAL_Delay(80);
             Chassis_SetPhysicalSpeed(0.0f, 0.0f);
             Alert_Start(ALERT_TARGET_FOUND);
+
+            // 🚨 极度重要：清空视觉停车标志，防止后续跑别的任务时误触发停车！
+            openmv_stop_flag = 0;
+
             car_state = STATE_TASK_ALERT;
         }
         else
         {
-            float mv_turn = openmv_x_error * 0.005f;
+            // 💡 视觉 P 参数微调
+            float mv_turn = openmv_x_error * 0.002f;
             Chassis_SetPhysicalSpeed(0.3f + mv_turn, 0.3f - mv_turn);
         }
         break;
@@ -133,7 +150,7 @@ void App_Run(void)
 
     case STATE_RETURN_LINE:
         Chassis_SetPhysicalSpeed(-0.3f, -0.3f);
-        if ((HAL_GetTick() - state_timer > 1000) && (Get_XunJi_State() != 0x00))
+        if ((HAL_GetTick() - state_timer > 700) && (Get_XunJi_State() != 0x00))
         {
             // 🌟 记录正式开始返程的时刻，开启“时间护盾”！
             return_journey_start_time = HAL_GetTick();
@@ -192,8 +209,8 @@ void App_Run(void)
 
         if (parking_step == 0)
         {
-            // 此时车头已经进入纯白车库，盲开 400ms 把后轮拖进来
-            if (HAL_GetTick() - state_timer < 400)
+            // 此时车头已经进入纯白车库，盲开 350ms 把后轮拖进来
+            if (HAL_GetTick() - state_timer < 350)
             {
                 Chassis_SetPhysicalSpeed(0.35f, 0.35f);
             }

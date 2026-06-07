@@ -100,6 +100,8 @@ int main(void)
     MX_TIM3_Init();
     /* USER CODE BEGIN 2 */
 
+    HAL_Delay(100);
+
     // 1. 启动所有 PWM 输出 (电机)
     HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
     HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);

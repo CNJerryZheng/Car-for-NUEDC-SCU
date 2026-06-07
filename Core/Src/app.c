@@ -19,6 +19,18 @@
 #define SPEED_OUTWARD 0.30f // 出发去寻找目标的循迹速度 (稍慢，确保OpenMV不漏看)
 #define SPEED_RETURN 0.80f // 任务完成后返程的循迹速度 (极速，抢比赛时间)
 
+// 📢 蜂鸣器硬件与行为配置 (需与 main.c 和 alert.c 保持一致)
+#define ENABLE_STARTUP_BEEP 1 // 1:开启开机和发车鸣笛, 0:关闭 (深夜调车防扰民)
+#define BEEP_ACTIVE_LEVEL 1 // 1:高电平触发鸣笛, 0:低电平触发鸣笛
+
+// 自动电平映射转换 (请勿修改)
+#if BEEP_ACTIVE_LEVEL == 1
+#define BEEP_ON GPIO_PIN_SET
+#define BEEP_OFF GPIO_PIN_RESET
+#else
+#define BEEP_ON GPIO_PIN_RESET
+#define BEEP_OFF GPIO_PIN_SET
+#endif
 // ==========================================
 
 // 定义系统的所有状态
@@ -66,10 +78,12 @@ void App_Run(void)
             // 再次确认是否真的按下了
             if (HAL_GPIO_ReadPin(START_KEY_GPIO_Port, START_KEY_Pin) == GPIO_PIN_SET)
             {
+#if ENABLE_STARTUP_BEEP == 1
                 // 【发车前置动作】：让蜂鸣器短鸣一声 “滴~”，提示手可以放开了
-                HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, GPIO_PIN_SET);
+                HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, BEEP_ON);
                 HAL_Delay(100);
-                HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, GPIO_PIN_RESET);
+                HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, BEEP_OFF);
+#endif
 
                 // 🔒 稳健松手检测：如果手一直按着，程序就卡死在这里，防止你手还没抽回来车就飞了
                 while (HAL_GPIO_ReadPin(START_KEY_GPIO_Port, START_KEY_Pin) == GPIO_PIN_SET)
@@ -107,17 +121,34 @@ void App_Run(void)
         break;
 
     case STATE_APPROACH_TARGET:
-        enable_line_tracking = 0;
-        float dist = Hcsr04GetLength();
-        if (dist > 0.0f && dist < 0.4f)
+        enable_line_tracking = 0; // 彻底剥夺底层循迹控制权
+
+        // 🌟 超声波 50ms 非阻塞旁路 (Fail-safe)
+        static uint32_t last_sonar_time = 0;
+        static float last_dist = 9.9f;
+
+        if (HAL_GetTick() - last_sonar_time > 50)
         {
+            last_dist = Hcsr04GetLength(); // 每 50ms 更新一次超声波作为兜底防撞
+            last_sonar_time = HAL_GetTick();
+        }
+
+        // 🌟 核心修改：双重保险停车逻辑！(视觉主导，超声波兜底)
+        if (openmv_stop_flag == 1 || (last_dist > 0.0f && last_dist < 0.4f))
+        {
+            HAL_Delay(80);
             Chassis_SetPhysicalSpeed(0.0f, 0.0f);
             Alert_Start(ALERT_TARGET_FOUND);
+
+            // 🚨 极度重要：清空视觉停车标志，防止后续跑别的任务时误触发停车！
+            openmv_stop_flag = 0;
+
             car_state = STATE_TASK_ALERT;
         }
         else
         {
-            float mv_turn = openmv_x_error * 0.005f;
+            // 💡 视觉 P 参数微调
+            float mv_turn = openmv_x_error * 0.002f;
             Chassis_SetPhysicalSpeed(0.3f + mv_turn, 0.3f - mv_turn);
         }
         break;
@@ -133,7 +164,7 @@ void App_Run(void)
 
     case STATE_RETURN_LINE:
         Chassis_SetPhysicalSpeed(-0.3f, -0.3f);
-        if ((HAL_GetTick() - state_timer > 1000) && (Get_XunJi_State() != 0x00))
+        if ((HAL_GetTick() - state_timer > 700) && (Get_XunJi_State() != 0x00))
         {
             // 🌟 记录正式开始返程的时刻，开启“时间护盾”！
             return_journey_start_time = HAL_GetTick();
@@ -192,8 +223,8 @@ void App_Run(void)
 
         if (parking_step == 0)
         {
-            // 此时车头已经进入纯白车库，盲开 500ms 把后轮拖进来
-            if (HAL_GetTick() - state_timer < 500)
+            // 此时车头已经进入纯白车库，盲开 350ms 把后轮拖进来
+            if (HAL_GetTick() - state_timer < 350)
             {
                 Chassis_SetPhysicalSpeed(0.35f, 0.35f);
             }

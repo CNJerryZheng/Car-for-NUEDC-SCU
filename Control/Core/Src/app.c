@@ -151,7 +151,7 @@ void App_Run(void)
         else
         {
             // 视觉 P 参数微调
-            float mv_turn = openmv_x_error * 0.002f;
+            float mv_turn = openmv_x_error * vision_adjust_factor;
             Chassis_SetPhysicalSpeed(0.3f + mv_turn, 0.3f - mv_turn);
         }
         break;

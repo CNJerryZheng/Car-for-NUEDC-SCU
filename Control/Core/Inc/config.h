@@ -44,6 +44,9 @@
 //死区数值
 #define deatharea 0.0f
 
+//视觉微调系数
+#define vision_adjust_factor 0.002f
+
 // 差速动态放大调车速度
 #define Debug_Speed 0.50f
 

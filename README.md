@@ -11,11 +11,12 @@
 ## 📂 仓库目录结构
 
 ```text
-📦 SmartCar-Project
- ┣ 📂 control    # 🧠 主控核心代码 (STM32 HAL库, C语言)
- ┣ 📂 vision     # 👁️ 视觉处理代码 (OpenMV, MicroPython)
- ┣ 📂 hardware   # 🛠️ 硬件原理图与PCB (立创EDA/Altium)
- ┗ 📜 README.md  # 📖 项目总说明
+📦 Car-for-NUEDC-SCU
+ ┣ 📂 Control           # 🧠 主控核心代码 (STM32 HAL库, C语言)
+ ┣ 📂 Hardware          # 🛠️ 硬件原理图与PCB (相关资料)
+ ┣ 📂 Vision            # 👁️ 视觉处理代码 (OpenMV, MicroPython)
+ ┣ 📜 README.md         # 📖 项目总说明
+ ┗ 📜 Requirements.pdf  # 📝 比赛要求
 ```
 
 ---

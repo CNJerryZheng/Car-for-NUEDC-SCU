@@ -41,6 +41,9 @@
 #define RKI 0.8f
 #define RKD 0.0f
 
+//死区数值
+#define deatharea 0.0f
+
 // 差速动态放大调车速度
 #define Debug_Speed 0.50f
 

@@ -1,4 +1,5 @@
 #include "pid.h"
+#include "config.h"
 
 /**
  * @brief  PID 参数初始化
@@ -25,7 +26,7 @@ float PID_Locomotive_Calc(PID_TypeDef* pid, float target, float current)
     float increment = 0.0f;
     pid->Error = target - current;
 
-    float deatharea = 0.0f;
+    // 死区处理，防止微小误差导致电机抖动
     if (pid->Error > -deatharea && pid->Error < deatharea)
     {
         pid->Error = 0.0f;

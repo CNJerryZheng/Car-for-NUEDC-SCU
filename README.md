@@ -22,11 +22,11 @@
 
 ## 🌟 核心技术亮点
 
-本项目在**“求稳”**与**“竞速”**之间寻找到了完美的平衡，尤其在控制算法和架构设计上进行了深度优化：
+本项目在 **“求稳”** 与 **“竞速”** 之间寻找到了完美的平衡，尤其在控制算法和架构设计上进行了深度优化：
 
 ### 1. 🧠 非阻塞式单向状态机 (Non-blocking State Machine)
 - 放弃传统的 `HAL_Delay()` 延时编程，采用基于 `HAL_GetTick()` 的全局时间戳管理。
-- 引入**“时间护盾”**与**“定时器陷阱”**机制，在极速（>0.8m/s）状态下实现车库入口和十字路口的异步无损检测。
+- 引入 **“时间护盾”** 与 **“定时器陷阱”** 机制，在极速（>0.8m/s）状态下实现车库入口和十字路口的异步无损检测。
 - 状态切换如行云流水（发车 -> 循迹 -> 视觉接管 -> 停车打卡 -> 返程恢复 -> 入库），逻辑严密不卡顿。
 
 ### 2. 🚀 高速自适应巡线算法 (Dynamic Gain Scheduling)
@@ -68,7 +68,7 @@
 
 1. **克隆仓库**：
    ```bash
-   git clone [https://github.com/CNJerryZheng/Car-for-NUEDC-SCU.git](https://github.com/CNJerryZheng/Car-for-NUEDC-SCU.git)
+   git clone https://github.com/CNJerryZheng/Car-for-NUEDC-SCU.git
    ```
 2. **电控烧录**：
    - 打开 `control/` 目录下的工程文件。

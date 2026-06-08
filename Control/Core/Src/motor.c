@@ -1,6 +1,6 @@
 #include "motor.h"
-#include "tim.h"
 #include "gpio.h"
+#include "tim.h"
 
 extern TIM_HandleTypeDef htim4;
 
@@ -100,6 +100,7 @@ void Car_Back(int16_t speed)
     Car_Go(-speed);
 }
 
+//差速转弯，适合大角度调整
 void Car_Left(int16_t speed)
 {
     Set_Motor_Output('A', speed);
@@ -116,6 +117,7 @@ void Car_Right(int16_t speed)
     Set_Motor_Output('D', speed);
 }
 
+//精确差速转弯，适合小角度调整
 void Car_Left_Precision(int16_t Lspeed, int16_t Rspeed)
 {
     Set_Motor_Output('A', Rspeed);
@@ -126,7 +128,6 @@ void Car_Left_Precision(int16_t Lspeed, int16_t Rspeed)
 
 void Car_Right_Precision(int16_t Lspeed, int16_t Rspeed)
 {
-    // 右转：右轮往后退，左轮往前走
     Set_Motor_Output('A', -Rspeed);
     Set_Motor_Output('B', -Rspeed);
     Set_Motor_Output('C', Lspeed);

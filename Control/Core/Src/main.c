@@ -2,7 +2,7 @@
 /**
  ******************************************************************************
  * @file           : main.c
- * @brief          : 智能小车电控主程序 (包含模块化测试)
+ * @brief          : 智能小车电控主程序
  ******************************************************************************
  */
 /* USER CODE END Header */
@@ -17,6 +17,7 @@
 #include "alert.h"
 #include "app.h"
 #include "chassis.h"
+#include "config.h"
 #include "debug.h"
 #include "motor.h"
 #include "openmv.h"
@@ -32,31 +33,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-/**
- * 🛠️ 测试模式选择宏定义 (极其重要)
- * 0: 【比赛模式】运行 app.c 的完整状态机
- * 1: 【底盘测试】闭环定速直行测试 (验证速度 PID)
- * 2: 【循迹测试】开启 LUT 查表循迹 (验证巡线平滑度)
- * 3: 【声光测试】循环播放声光提示
- * 4: 【VOFA测试】通过串口发送超声波和 OpenMV 数据到电脑查看
- */
-#define TEST_MODE 0
 
-// ==========================================
-// 📢 蜂鸣器硬件与行为配置
-// ==========================================
-#define ENABLE_STARTUP_BEEP 1 // 1:开启开机和发车鸣笛, 0:关闭 (深夜调车防扰民)
-#define BEEP_ACTIVE_LEVEL 1 // 1:高电平触发鸣笛, 0:低电平触发鸣笛
-
-// 自动电平映射转换 (请勿修改)
-#if BEEP_ACTIVE_LEVEL == 1
-#define BEEP_ON GPIO_PIN_SET
-#define BEEP_OFF GPIO_PIN_RESET
-#else
-#define BEEP_ON GPIO_PIN_RESET
-#define BEEP_OFF GPIO_PIN_SET
-#endif
-// ==========================================
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -81,10 +58,6 @@ void SystemClock_Config(void);
 
 /* USER CODE END 0 */
 
-/**
-  * @brief  The application entry point.
-  * @retval int
-  */
 int main(void)
 {
     /* USER CODE BEGIN 1 */
@@ -118,17 +91,17 @@ int main(void)
 
     HAL_Delay(100);
 
-    // 1. 启动所有 PWM 输出 (电机)
+    // 启动所有 PWM 输出 (电机)
     HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
     HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
     HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);
     HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
 
-    // 2. 启动硬件编码器计数
+    // 启动硬件编码器计数
     HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
     HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
 
-    // 3. 各模块软件初始化
+    // 各模块软件初始化
     Chassis_Init();
     OpenMV_Init();
     App_Init();
@@ -142,9 +115,10 @@ int main(void)
     // 确保蜂鸣器初始状态为静音
     HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, BEEP_OFF);
 #endif
-    HAL_Delay(1000); // 留出一点放置小车的时间
+    // 留出一点放置小车的时间
+    HAL_Delay(1000);
 
-    // 4. 开启 TIM1 10ms 节拍器中断 (系统心跳)
+    // 开启 TIM1 10ms 节拍器中断
     HAL_TIM_Base_Start_IT(&htim1);
 
     /* USER CODE END 2 */
@@ -166,7 +140,6 @@ int main(void)
 
 #elif (TEST_MODE == 2)
         // 【循迹测试】: 屏蔽 APP 逻辑，单纯让底盘按黑线跑
-        // 实际上什么都不用写，因为 10ms 中断里已经在跑 Chassis_Update() 了
         HAL_Delay(100);
 
 #elif (TEST_MODE == 3)
@@ -235,9 +208,9 @@ void SystemClock_Config(void)
 /* USER CODE BEGIN 4 */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 {
-    if (htim->Instance == TIM1) // 确保是 TIM1 溢出 (10ms)
+    if (htim->Instance == TIM1)
     {
-        // 底盘运动学核心更新 (包括循迹 LUT 和 PID 计算)
+        // 底盘运动学核心更新
         Chassis_Update();
     }
 }

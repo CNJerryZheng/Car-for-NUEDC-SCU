@@ -1,19 +1,5 @@
 #include "alert.h"
-
-// ==========================================
-// 📢 蜂鸣器硬件电平配置 (需与 main.c 和 app.c 保持一致)
-// ==========================================
-#define BEEP_ACTIVE_LEVEL 1 // 1:高电平触发鸣笛, 0:低电平触发鸣笛
-
-// 自动电平映射转换 (请勿修改)
-#if BEEP_ACTIVE_LEVEL == 1
-#define BEEP_ON GPIO_PIN_SET
-#define BEEP_OFF GPIO_PIN_RESET
-#else
-#define BEEP_ON GPIO_PIN_RESET
-#define BEEP_OFF GPIO_PIN_SET
-#endif
-// ==========================================
+#include "config.h"
 
 static AlertType_t current_alert = ALERT_NONE;
 static uint32_t alert_start_time = 0;
@@ -39,7 +25,7 @@ uint8_t Alert_Process(void)
 
     if (current_alert == ALERT_TARGET_FOUND)
     {
-        // 比赛要求：闪/响2次，每次大于1秒 (亮1.2s -> 灭0.5s -> 亮1.2s -> 灭0.5s)
+        // 闪/响2次，每次大于1秒 (亮1.2s -> 灭0.5s -> 亮1.2s -> 灭0.5s)
         if (elapsed_time < 1200)
         {
             HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, BEEP_ON);
@@ -68,7 +54,7 @@ uint8_t Alert_Process(void)
     }
     else if (current_alert == ALERT_PARKING)
     {
-        // 停车：长鸣 3 秒 (不要求闪灯，安全起见把灯关掉)
+        // 停车：长鸣 3 秒, 同时亮起外部 LED
         if (elapsed_time < 3000)
         {
             HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, BEEP_ON);

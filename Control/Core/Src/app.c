@@ -1,60 +1,44 @@
+/**
+ ******************************************************************************
+ * @file           : app.c
+ * @brief          : 智能小车核心应用逻辑 (状态机)
+ ******************************************************************************
+ */
+
 #include "app.h"
 #include "alert.h"
 #include "chassis.h"
+#include "config.h"
 #include "main.h"
 #include "motor.h"
 #include "openmv.h"
 #include "sensor.h"
 
-// ==========================================
-// 📍 比赛与调试控制中心 (下地调车，只改这里！)
-// ==========================================
-
-// 🔄 模式切换开关
-// 0: 【调试模式】跳过视觉打卡，按极速直接测试回城与入库
-// 1: 【正常模式】完整比赛流程 (出发 -> 找柱子 -> 打卡 -> 回归 -> 极速回城 -> 入库)
-#define TASK_MODE 1
-
-// ⚡ 战术速度调节
-#define SPEED_OUTWARD 0.30f // 出发去寻找目标的循迹速度 (稍慢，确保OpenMV不漏看)
-#define SPEED_RETURN 0.85f // 任务完成后返程的循迹速度 (极速，抢比赛时间)
-
-// 🔄 任务完成后回线策略 (🌟 新增)
-// 0: 【倒车回线】打卡后挂倒挡，原路退回黑线 (保守安全)
-// 1: 【直行回线】打卡后继续直行，往前寻找黑线 (激进省时，适合赛道在前方的场地)
-#define RETURN_STRATEGY 0
-
-// 📢 蜂鸣器硬件与行为配置 (需与 main.c 和 alert.c 保持一致)
-#define ENABLE_STARTUP_BEEP 1 // 1:开启开机和发车鸣笛, 0:关闭 (深夜调车防扰民)
-#define BEEP_ACTIVE_LEVEL 1 // 1:高电平触发鸣笛, 0:低电平触发鸣笛
-
-// 自动电平映射转换 (请勿修改)
-#if BEEP_ACTIVE_LEVEL == 1
-#define BEEP_ON GPIO_PIN_SET
-#define BEEP_OFF GPIO_PIN_RESET
-#else
-#define BEEP_ON GPIO_PIN_RESET
-#define BEEP_OFF GPIO_PIN_SET
-#endif
-// ==========================================
-
-// 定义系统的所有状态
 typedef enum
 {
-    STATE_WAIT_START,
-    STATE_TRACKING_OUT,
-    STATE_APPROACH_TARGET,
-    STATE_TASK_ALERT,
-    STATE_RETURN_LINE,
-    STATE_TRACKING_BACK,
-    STATE_PARKING,
-    STATE_STOPPED
+    STATE_WAIT_START, //等待启动
+    STATE_TRACKING_OUT, //出发循迹
+    STATE_APPROACH_TARGET, //接近目标
+    STATE_TASK_ALERT, //任务完成提示
+    STATE_RETURN_LINE, //返程找线
+    STATE_TRACKING_BACK, //返程循迹
+    STATE_PARKING, //停车
+    STATE_STOPPED //完全停止
 } CarState_t;
 
 static CarState_t car_state = STATE_WAIT_START;
 static uint32_t state_timer = 0;
-// 🌟 新增：返程计时器（时间护盾）
-static uint32_t return_journey_start_time = 0;
+static uint32_t return_journey_start_time = 0; //返程计时器（时间护盾）
+
+//超声波 50ms 非阻塞旁路(Fail - safe)
+static uint32_t last_sonar_time = 0;
+static float last_dist = 9.9f;
+
+static uint8_t garage_armed = 0; // 车库陷阱触发器
+static uint32_t arm_time = 0; // 陷阱开启时间
+
+static uint8_t parking_step = 0;
+static uint8_t parking_alert_started = 0;
 
 extern uint8_t enable_line_tracking;
 
@@ -71,11 +55,11 @@ void App_Run(void)
     switch (car_state)
     {
     case STATE_WAIT_START:
-        // 🚨 核心修复 1：强行关掉底层自动循迹，防止它覆盖我们的停车指令！
+        // 强行关掉底层自动循迹，防止覆盖停车指令
         enable_line_tracking = 0;
         Chassis_SetPhysicalSpeed(0.0f, 0.0f); // 保持原地静止死锁
 
-        // 🌟 扫描启动开关（高电平有效）
+        // 扫描启动开关（高电平有效）
         if (HAL_GPIO_ReadPin(START_KEY_GPIO_Port, START_KEY_Pin) == GPIO_PIN_SET)
         {
             HAL_Delay(20); // 软件消抖：延时20ms避开机械按键按下的前沿抖动
@@ -84,27 +68,26 @@ void App_Run(void)
             if (HAL_GPIO_ReadPin(START_KEY_GPIO_Port, START_KEY_Pin) == GPIO_PIN_SET)
             {
 #if ENABLE_STARTUP_BEEP == 1
-                // 【发车前置动作】：让蜂鸣器短鸣一声 “滴~”，提示手可以放开了
+                // 让蜂鸣器短鸣一声 ，提示手可以放开了
                 HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, BEEP_ON);
                 HAL_Delay(100);
                 HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, BEEP_OFF);
 #endif
 
-                // 🔒 稳健松手检测：如果手一直按着，程序就卡死在这里，防止你手还没抽回来车就飞了
+                // 稳健松手检测：如果手一直按着，程序就卡死在这里，直到手彻底松开为止，防止误触发后续状态
                 while (HAL_GPIO_ReadPin(START_KEY_GPIO_Port, START_KEY_Pin) == GPIO_PIN_SET)
                     ;
 
-                HAL_Delay(200); // 给你额外的 200ms 反应时间把手彻底抽回
+                HAL_Delay(200); // 额外 200ms 反应时间
 
                 // 重置所有核心时间戳，防止定时器溢出误判
                 state_timer = HAL_GetTick();
                 return_journey_start_time = HAL_GetTick();
 
-                // 🚀 正式发车！
-                enable_line_tracking = 1; // 🚨 解除封印，恢复底层自动循迹！
+                enable_line_tracking = 1; // 恢复底层自动循迹
 
 #if TASK_MODE == 0
-                // 【调试模式】直接应用返程极速，并跳过任务直接回城
+                // 【调试模式】直接应用返程极速，并跳过任务直接回车库
                 Chassis_SetTrackingBaseSpeed(SPEED_RETURN);
                 car_state = STATE_TRACKING_BACK;
 #else
@@ -126,11 +109,9 @@ void App_Run(void)
         break;
 
     case STATE_APPROACH_TARGET:
-        enable_line_tracking = 0; // 彻底剥夺底层循迹控制权
+        enable_line_tracking = 0; // 停用底层循迹控制
 
-        // 🌟 超声波 50ms 非阻塞旁路 (Fail-safe)
-        static uint32_t last_sonar_time = 0;
-        static float last_dist = 9.9f;
+        // 超声波 50ms 非阻塞旁路 (Fail-safe)
 
         if (HAL_GetTick() - last_sonar_time > 50)
         {
@@ -138,28 +119,28 @@ void App_Run(void)
             last_sonar_time = HAL_GetTick();
         }
 
-        // 🌟 核心修改：双重保险停车逻辑！(视觉主导，超声波兜底)
+        // 视觉主导，超声波辅助，双重触发停车
         if (openmv_stop_flag == 1 || (last_dist > 0.0f && last_dist < 0.4f))
         {
             HAL_Delay(80);
             Chassis_SetPhysicalSpeed(0.0f, 0.0f);
             Alert_Start(ALERT_TARGET_FOUND);
 
-            // 🚨 极度重要：清空视觉停车标志，防止后续跑别的任务时误触发停车！
+            // 清空视觉停车标志，防止误触发后续状态
             openmv_stop_flag = 0;
 
             car_state = STATE_TASK_ALERT;
         }
         else
         {
-            // 💡 视觉 P 参数微调
+            // 视觉 P 参数微调
             float mv_turn = openmv_x_error * 0.002f;
             Chassis_SetPhysicalSpeed(0.3f + mv_turn, 0.3f - mv_turn);
         }
         break;
 
     case STATE_TASK_ALERT:
-        Chassis_Stop_And_Reset(); // 🌟 打卡期间彻底死锁，消除残留推力
+        Chassis_Stop_And_Reset(); // 死锁停车闪灯蜂鸣
         if (alert_done == 1)
         {
             state_timer = HAL_GetTick();
@@ -172,28 +153,27 @@ void App_Run(void)
 #if RETURN_STRATEGY == 0
         // 【策略 0：原路倒车】
         Chassis_SetPhysicalSpeed(-0.3f, -0.3f);
-        // 这里的 700 是“护盾时间”(盲开时间)，防止刚启动时被地上的阴影或绿柱子底座误判为黑线
-        if ((HAL_GetTick() - state_timer > 700) && (Get_XunJi_State() != 0x00))
+        // 500ms 的护盾时间，确保车完全离开绿柱子区域，防止被地上的阴影或绿柱子底座误判为黑线
+        if ((HAL_GetTick() - state_timer > 500) && (Get_XunJi_State() != 0x00))
         {
-            // 🌟 记录正式开始返程的时刻，开启“时间护盾”！
+            // 记录正式开始返程的时刻，开启时间护盾
             return_journey_start_time = HAL_GetTick();
 
-            // 🌟 核心操作：任务已完成，动态切换为返程极速模式！
+            // 核心操作：任务已完成，动态切换为返程极速模式
             Chassis_SetTrackingBaseSpeed(SPEED_RETURN);
 
             car_state = STATE_TRACKING_BACK;
         }
 #else
         // 【策略 1：继续直行】
-        // 💡 如果你觉得 0.3 的直行找线速度太慢，可以单独把这里改成 0.4f
         Chassis_SetPhysicalSpeed(0.3f, 0.3f);
-        // 这里的 1000 是“护盾时间”(盲开时间)，防止刚启动时被地上的阴影或绿柱子底座误判为黑线
-        if ((HAL_GetTick() - state_timer > 1000) && (Get_XunJi_State() != 0x00))
+        // 500ms 的护盾时间，确保车完全离开绿柱子区域，防止被地上的阴影或绿柱子底座误判为黑线
+        if ((HAL_GetTick() - state_timer > 500) && (Get_XunJi_State() != 0x00))
         {
-            // 🌟 记录正式开始返程的时刻，开启“时间护盾”！
+            // 记录正式开始返程的时刻，开启时间护盾
             return_journey_start_time = HAL_GetTick();
 
-            // 🌟 核心操作：任务已完成，动态切换为返程极速模式！
+            // 核心操作：任务已完成，动态切换为返程极速模式
             Chassis_SetTrackingBaseSpeed(SPEED_RETURN);
 
             car_state = STATE_TRACKING_BACK;
@@ -203,14 +183,12 @@ void App_Run(void)
         break;
 
     case STATE_TRACKING_BACK:
-        // 🌟 核心改变：始终保持循迹开启！让底层 LUT 去对付急转弯！
+        // 返程循迹，持续监测车库陷阱
         enable_line_tracking = 1;
 
-        // 护盾时间：确保完全离开绿柱子区域后才开始检测车库
+        // 确保完全离开绿柱子区域后才开始检测车库
         if (HAL_GetTick() - return_journey_start_time > 2500)
         {
-            static uint8_t garage_armed = 0; // 车库陷阱触发器
-            static uint32_t arm_time = 0; // 陷阱开启时间
             uint8_t current_state = Get_XunJi_State();
 
             if (garage_armed == 0)
@@ -222,10 +200,10 @@ void App_Run(void)
                     arm_time = HAL_GetTick();
                 }
             }
-            else // 车库陷阱已开启！此时 LUT 仍在默默工作帮你纠偏
+            else // 车库陷阱已开启！循迹继续，但密切监视状态变化
             {
-                // 1. 如果在极短时间内 (300ms 内) 彻底脱离黑线，变成全白
-                // 这说明线物理上断了，100% 是车库！
+                // 如果在极短时间内 (50ms内) 彻底脱离黑线，变成全白
+                // 这说明线物理上断了，判断为车库入口，正式切换状态进入停车流程
                 if (current_state == 0x00)
                 {
                     enable_line_tracking = 0; // 确认进车库，正式切断循迹
@@ -233,10 +211,10 @@ void App_Run(void)
                     car_state = STATE_PARKING;
                     garage_armed = 0; // 重置陷阱
                 }
-                // 2. 如果超过 50ms 还没变成全白，说明只是急转弯或者十字路口
+                // 如果超过 50ms 还没变成全白，说明只是急转弯或者十字路口
                 else if (HAL_GetTick() - arm_time > 50)
                 {
-                    garage_armed = 0; // 虚惊一场，自动解除陷阱，继续正常跑
+                    garage_armed = 0; // 自动解除陷阱，继续正常跑
                 }
             }
         }
@@ -244,12 +222,9 @@ void App_Run(void)
 
     case STATE_PARKING:
     {
-        static uint8_t parking_step = 0;
-        static uint8_t parking_alert_started = 0;
-
         if (parking_step == 0)
         {
-            // 此时车头已经进入纯白车库，盲开 350ms 把后轮拖进来
+            //此时车头已经进入车库，盲开 350ms 把后轮拖进来
             if (HAL_GetTick() - state_timer < 350)
             {
                 Chassis_SetPhysicalSpeed(0.35f, 0.35f);
@@ -285,7 +260,7 @@ void App_Run(void)
     }
     case STATE_STOPPED:
         enable_line_tracking = 0;
-        Chassis_Stop_And_Reset(); // 🌟 比赛结束，彻底断电重置
+        Chassis_Stop_And_Reset(); // 比赛结束，彻底断电重置
         break;
     }
 }

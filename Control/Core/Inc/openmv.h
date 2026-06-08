@@ -1,5 +1,4 @@
-#ifndef __OPENMV_H
-#define __OPENMV_H
+#pragma once
 
 #include "main.h"
 
@@ -10,5 +9,3 @@ extern uint8_t openmv_stop_flag;
 
 // 初始化函数
 void OpenMV_Init(void);
-
-#endif

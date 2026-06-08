@@ -1,4 +1,5 @@
 #include "sensor.h"
+#include "config.h"
 #include "gpio.h"
 #include "tim.h"
 
@@ -32,16 +33,16 @@ float Hcsr04GetLength(void)
 
     start_time = __HAL_TIM_GET_COUNTER(&htim1);
 
-    // 等待 Echo 变低 (加入防多次溢出保护)
-    // 💡 降低这里的 timeout 循环次数，确保在 10ms (1.7米) 内强制退出，防止 TIM1 溢出超过1次
+    // 等待 Echo 变低 (防多次溢出保护)
+    // 降低这里的 timeout 循环次数，确保在 10ms (1.7米) 内强制退出，防止 TIM1 溢出超过1次
     timeout = 15000;
     while (HAL_GPIO_ReadPin(Echo_GPIO_Port, Echo_Pin) == GPIO_PIN_SET && timeout--)
     {
     }
 
-    // 如果超时退出，说明距离太远，直接返回一个安全的最大值 (或者 0)
+    // 如果超时退出，说明距离太远，直接返回一个安全的最大值
     if (timeout == 0)
-        return 1.50f; // 默认超过 1.5 米就返回 1.5
+        return 1.50f;
 
     end_time = __HAL_TIM_GET_COUNTER(&htim1);
 
@@ -52,13 +53,11 @@ float Hcsr04GetLength(void)
     }
     else
     {
-        // 🚨 适配新的 10ms 周期，ARR 为 99
         delta_time = (99 + 1 - start_time) + end_time;
     }
 
-    // 之前的设定：1个 tick = 100us
     float microsecond = (float)delta_time * 100.0f;
-    return (microsecond / 58.0f) / 100.0f; // 建议最后再除以 100.0f，直接返回 "米(m)"，方便你统一单位
+    return (microsecond / ULTRASONIC_COEFFICIENT) / 100.0f; // 单位为米
 }
 
 uint8_t Get_XunJi_State(void)
@@ -120,16 +119,13 @@ float Get_Line_Error(uint8_t state)
     case 0x01:
         error = 4.0f;
         break; // 00001 (黑线到了最右边 R2，即将脱轨)
-
-    // ============ 遇到十字路口或大块黑斑 (全亮) ============
+    // ============ 车体位置不确定，但明显不是完全丢线了，保持上一刻的判断继续调整 ============
     case 0x1F:
     case 0x0E: // 01110
     case 0x1B: // 11011
-        /*error = 0.0f; // 直接保持直行冲过去*/
-        error = last_line_error; // 保持直行冲过去
+        error = last_line_error; // 保持上一刻的判断
         break;
-
-    // ============ ⚠️ 致命状态：完全丢线 (00000) ============
+    // ============ 丢线了，无法判断黑线位置 ============
     case 0x00:
         // 如果丢线前一瞬间黑线在最左边，说明车往右冲出去了，必须死命左转拉回来
         if (last_line_error < 0)

@@ -1,4 +1,4 @@
-# 🏎️ 全国大学生电子设计竞赛 - 智能视觉循迹小车
+# 🏎️ 全国大学生电子设计竞赛 - 智能视觉循迹小车 - 四川大学校赛
 
 ![STM32](https://img.shields.io/badge/STM32-F103-blue.svg) ![OpenMV](https://img.shields.io/badge/OpenMV-MicroPython-green.svg) ![Status](https://img.shields.io/badge/Status-Active-brightgreen.svg) ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 

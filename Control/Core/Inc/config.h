@@ -76,6 +76,11 @@
 // 1: 【直行回线】打卡后继续直行，往前寻找黑线
 #define RETURN_STRATEGY 0
 
+// 是否循环完成任务
+// 0: 任务完成后停在车库里不动了
+// 1: 任务完成后继续循环重新出发
+#define LOOP_COMPLETED_TASK 1
+
 // 蜂鸣器硬件电平与行为配置
 #define ENABLE_STARTUP_BEEP 1 // 1:开启开机和发车鸣笛, 0:关闭
 #define BEEP_ACTIVE_LEVEL 1 // 1:高电平触发鸣笛, 0:低电平触发鸣笛

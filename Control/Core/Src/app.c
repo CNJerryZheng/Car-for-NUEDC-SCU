@@ -48,6 +48,23 @@ void App_Init(void)
     state_timer = HAL_GetTick();
 }
 
+void APP_Clear(void)
+{
+    // 清理视觉残留信号
+    extern uint8_t openmv_found_target;
+    extern uint8_t openmv_stop_flag;
+    openmv_found_target = 0;
+    openmv_stop_flag = 0;
+
+    // 清理车库陷阱与停车步骤
+    garage_armed = 0;
+    parking_step = 0;
+    parking_alert_started = 0;
+
+    // 切换状态机回初始状态
+    car_state = STATE_WAIT_START;
+}
+
 void App_Run(void)
 {
     uint8_t alert_done = Alert_Process();
@@ -250,6 +267,13 @@ void App_Run(void)
     case STATE_STOPPED:
         enable_line_tracking = 0;
         Chassis_Stop_And_Reset(); // 比赛结束，彻底断电重置
+#if LOOP_COMPLETED_TASK == 1
+        // 如果配置允许循环完成任务，停留3秒后自动重置状态机
+        if (HAL_GetTick() - state_timer > 3000)
+        {
+            APP_Clear();
+        }
+#endif
         break;
     }
 }

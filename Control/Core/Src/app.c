@@ -153,20 +153,10 @@ void App_Run(void)
 #if RETURN_STRATEGY == 0
         // 【策略 0：原路倒车】
         Chassis_SetPhysicalSpeed(-0.3f, -0.3f);
-        // 500ms 的护盾时间，确保车完全离开绿柱子区域，防止被地上的阴影或绿柱子底座误判为黑线
-        if ((HAL_GetTick() - state_timer > 500) && (Get_XunJi_State() != 0x00))
-        {
-            // 记录正式开始返程的时刻，开启时间护盾
-            return_journey_start_time = HAL_GetTick();
-
-            // 核心操作：任务已完成，动态切换为返程极速模式
-            Chassis_SetTrackingBaseSpeed(SPEED_RETURN);
-
-            car_state = STATE_TRACKING_BACK;
-        }
 #else
         // 【策略 1：继续直行】
         Chassis_SetPhysicalSpeed(0.3f, 0.3f);
+#endif
         // 500ms 的护盾时间，确保车完全离开绿柱子区域，防止被地上的阴影或绿柱子底座误判为黑线
         if ((HAL_GetTick() - state_timer > 500) && (Get_XunJi_State() != 0x00))
         {
@@ -178,7 +168,6 @@ void App_Run(void)
 
             car_state = STATE_TRACKING_BACK;
         }
-#endif
 
         break;
 

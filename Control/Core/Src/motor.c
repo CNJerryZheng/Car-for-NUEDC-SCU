@@ -1,5 +1,4 @@
 #include "motor.h"
-#include "gpio.h"
 #include "tim.h"
 
 extern TIM_HandleTypeDef htim4;

@@ -14,15 +14,10 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "alert.h"
 #include "app.h"
 #include "chassis.h"
 #include "config.h"
-#include "debug.h"
-#include "motor.h"
 #include "openmv.h"
-#include "pid.h"
-#include "sensor.h"
 
 /* USER CODE END Includes */
 
